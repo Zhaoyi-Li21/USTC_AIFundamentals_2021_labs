@@ -3,7 +3,15 @@ import cvxopt #用于求解线性规划
 from process_data import load_and_process_data
 from evaluation import get_micro_F1,get_macro_F1,get_acc
 
+from sklearn import svm
 
+
+cvxopt.solvers.options['show_progress'] = False
+'''
+cvxopt.solvers.options['relto1'] = 1e-10
+cvxopt.solvers.options['absto1'] = 1e-11
+cvxopt.solvers.options['feasto1'] = 1e-11
+'''
 #根据指定类别main_class生成1/-1标签
 def svm_label(labels,main_class):
     new_label=[]
@@ -50,11 +58,62 @@ class SupportVectorMachine:
         '''
         需要你实现的部分
         '''
-
-
-
-
-
+      
+        # 首先构造系数矩阵P，Pij = <yixi,yjxj>
+        train_num = train_data.shape[0]
+        P = np.zeros((train_num,train_num))
+        temp = train_data
+        for i in range(train_num):
+            for j in range(train_num):
+                P[i][j] = self.KERNEL(temp[i],temp[j],self.kernel)*train_label[i]*train_label[j]
+        
+      
+        # 构造q
+        q = np.ones((train_num,1))
+        q = -1*q
+        # 构造G
+        G1 = np.eye(train_num,dtype = int)
+        G2 = np.eye(train_num,dtype = int)
+        G2 = -1*G2
+        G = np.r_[G1,G2]
+        # 构造h
+        h1 = np.zeros((train_num,1))
+        for i in range(train_num):
+            h1[i] = self.C
+        h2 = np.zeros((train_num,1))
+        h = np.r_[h1,h2]
+        # 构造A
+        A = train_label.reshape(1,train_num)
+        # 构造b
+        b = np.zeros((1,1))
+        P = P.astype(np.double)
+        q = q.astype(np.double)
+        G = G.astype(np.double)
+        h = h.astype(np.double)
+        A = A.astype(np.double)
+        b = b.astype(np.double)
+        P_1 = cvxopt.matrix(P)
+        q_1 = cvxopt.matrix(q)
+        G_1 = cvxopt.matrix(G)
+        h_1 = cvxopt.matrix(h)
+        A_1 = cvxopt.matrix(A)
+        b_1 = cvxopt.matrix(b)
+        sol = cvxopt.solvers.qp(P_1,q_1,G_1,h_1,A_1,b_1)
+        sol_x = sol['x']
+        alpha = np.array(sol_x)
+       
+        indices = np.where(alpha > self.Epsilon)[0]
+        bias = np.mean(
+            [train_label[i] - sum([train_label[i] * alpha[i] * self.KERNEL(x, train_data[i],self.kernel) for x in train_data[indices]]) for i in indices])
+        test_num = test_data.shape[0]
+        predictions = []
+        for j in range(test_num):
+            prediction = bias +  sum([train_label[i] * alpha[i] * self.KERNEL(test_data[j], train_data[i],self.kernel) for i in indices])
+            predictions.append(prediction)
+        prediction = np.array(predictions).reshape(test_num,1)
+        # print(prediction)
+        return prediction
+           
 def main():
     # 加载训练集和测试集
     Train_data,Train_label,Test_data,Test_label=load_and_process_data()
@@ -70,10 +129,12 @@ def main():
     #kernel为核函数类型，可能的类型有'Linear'/'Poly'/'Gauss'
     #C为软间隔参数；
     #Epsilon为拉格朗日乘子阈值，低于此阈值时将该乘子设置为0
+
     kernel='Linear' 
     C = 1
     Epsilon=10e-5
     #生成SVM分类器
+    
     SVM=SupportVectorMachine(kernel,C,Epsilon)
 
     predictions = []
@@ -88,6 +149,15 @@ def main():
     #one-vs-all, 最终分类结果选择最大score对应的类别
     pred=np.argmax(predictions,axis=0)+1
 
+    
+    
+    '''
+    SVM = svm.SVC(C=2,kernel='linear',decision_function_shape='ovr')
+    SVM.fit(train_data,Train_label)
+    pred = SVM.predict(test_data)
+    pred = pred.reshape(pred.shape[0],1)
+    '''
+    
     # 计算准确率Acc及多分类的F1-score
     print("Acc: "+str(get_acc(test_label,pred)))
     print("macro-F1: "+str(get_macro_F1(test_label,pred)))
